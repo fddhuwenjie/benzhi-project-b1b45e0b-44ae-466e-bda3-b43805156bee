@@ -101,7 +101,7 @@ func (s *Service) Read(caseID string) (Document, []byte, error) {
 	if value, ok := s.cache.Load(caseID); ok {
 		cached := value.(cachedDocument)
 		if cached.fileDigest == fileDigest {
-			return cached.document, data, nil
+			return cloneDocument(cached.document), data, nil
 		}
 	}
 	var doc Document
@@ -109,7 +109,7 @@ func (s *Service) Read(caseID string) (Document, []byte, error) {
 		return Document{}, nil, err
 	}
 	s.cache.Store(caseID, cachedDocument{fileDigest: fileDigest, document: doc})
-	return doc, data, nil
+	return cloneDocument(doc), data, nil
 }
 
 func (s *Service) Verify(caseID string) (Verification, error) {
@@ -154,6 +154,18 @@ func (s *Service) Verify(caseID string) (Verification, error) {
 		result.Message = "档案完整性校验失败，请依据分区结果定位受影响内容"
 	}
 	return result, nil
+}
+
+func cloneDocument(doc Document) Document {
+	b, err := json.Marshal(doc)
+	if err != nil {
+		return doc
+	}
+	var clone Document
+	if err := json.Unmarshal(b, &clone); err != nil {
+		return doc
+	}
+	return clone
 }
 
 func sectionDigests(doc Document) ([]SectionDigest, error) {
