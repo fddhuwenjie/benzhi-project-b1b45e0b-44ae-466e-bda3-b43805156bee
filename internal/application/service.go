@@ -193,6 +193,11 @@ func (s *Service) commit(caseID, requestID, action string, events []domain.Event
 	}
 	result.Status = agg.Case.Status
 	result.Revision = agg.Case.Revision
+	if corrected, _ := json.Marshal(result); !bytes.Equal(corrected, b) {
+		if err := s.store.UpdateIdempotentResponse(caseID, requestID, result); err != nil {
+			return CommandResult{}, err
+		}
+	}
 	return result, nil
 }
 
