@@ -3,6 +3,7 @@ package domain
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -236,3 +237,105 @@ func sortedKeys[T any](m map[string]T) []string {
 }
 func nonblank(value string) bool     { return strings.TrimSpace(value) != "" }
 func validTime(value time.Time) bool { return !value.IsZero() && value.Year() >= 2000 }
+
+// Equal reports whether two aggregates have identical content.
+// It treats nil and empty maps/slices as equivalent, matching the
+// invariants maintained by ensureMaps and the JSON round-trip used when
+// persisting checkpoints (omitted omitempty fields decode to nil, while the
+// in-memory state uses non-nil empty slices/maps). This is used to verify
+// that a cached checkpoint aggregate still matches the state derived from the
+// event history, so that tampered or stale cached content cannot be trusted.
+func (a *Aggregate) Equal(other *Aggregate) bool {
+	if other == nil {
+		return false
+	}
+	return deepEqualNormalized(reflect.ValueOf(*a), reflect.ValueOf(*other))
+}
+
+// deepEqualNormalized is a deep comparison that treats nil and empty
+// slices/maps as equivalent. This mirrors the JSON round-trip invariants
+// (omitted omitempty fields decode to nil) so a freshly rehydrated aggregate,
+// which holds non-nil empty slices/maps, compares equal to one restored from
+// checkpoint JSON.
+func deepEqualNormalized(x, y reflect.Value) bool {
+	if !x.IsValid() || !y.IsValid() {
+		return x.IsValid() == y.IsValid()
+	}
+	switch x.Kind() {
+	case reflect.Slice, reflect.Array:
+		if x.Len() == 0 && y.Len() == 0 {
+			return true
+		}
+		if x.Len() != y.Len() {
+			return false
+		}
+		for i := 0; i < x.Len(); i++ {
+			if !deepEqualNormalized(x.Index(i), y.Index(i)) {
+				return false
+			}
+		}
+		return true
+	case reflect.Map:
+		if x.Len() == 0 && y.Len() == 0 {
+			return true
+		}
+		if x.Len() != y.Len() {
+			return false
+		}
+		for _, key := range x.MapKeys() {
+			yv := y.MapIndex(key)
+			if !yv.IsValid() || !deepEqualNormalized(x.MapIndex(key), yv) {
+				return false
+			}
+		}
+		return true
+	case reflect.Struct:
+		if x.Type() != y.Type() {
+			return false
+		}
+		for i := 0; i < x.NumField(); i++ {
+			if !deepEqualNormalized(x.Field(i), y.Field(i)) {
+				return false
+			}
+		}
+		return true
+	case reflect.Interface:
+		if x.IsNil() && y.IsNil() {
+			return true
+		}
+		if x.IsNil() || y.IsNil() {
+			return false
+		}
+		return deepEqualNormalized(x.Elem(), y.Elem())
+	case reflect.Pointer:
+		if x.IsNil() && y.IsNil() {
+			return true
+		}
+		if x.IsNil() || y.IsNil() {
+			return false
+		}
+		return deepEqualNormalized(x.Elem(), y.Elem())
+	default:
+		// Compare primitive comparable values without forcing .Interface(),
+		// which would panic on unexported fields. Use the typed comparison
+		// helpers where possible and fall back to DeepEqual only for values
+		// that can be surfaced.
+		switch x.Kind() {
+		case reflect.Bool:
+			return x.Bool() == y.Bool()
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			return x.Int() == y.Int()
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			return x.Uint() == y.Uint()
+		case reflect.Float32, reflect.Float64:
+			return x.Float() == y.Float()
+		case reflect.String:
+			return x.String() == y.String()
+		default:
+			if x.CanInterface() && y.CanInterface() {
+				return reflect.DeepEqual(x.Interface(), y.Interface())
+			}
+			return false
+		}
+	}
+}

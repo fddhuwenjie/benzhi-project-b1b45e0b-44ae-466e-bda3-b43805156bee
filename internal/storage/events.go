@@ -92,6 +92,20 @@ func (s *Store) loadVerified(caseID string) (*domain.Aggregate, []StoredEvent, e
 		if checkpoint.RootDigest != expectedRoot {
 			return nil, nil, fmt.Errorf("检查点根摘要无效")
 		}
+		// Verify the cached aggregate content matches the state derived by
+		// replaying the event history up to the checkpoint revision. The
+		// checks above only cover identity/revision/root pointers, so without
+		// this content verification a tampered checkpoint whose case_id,
+		// revision and root_digest are left intact would be trusted and the
+		// injected aggregate state would be served. Reject such checkpoints
+		// instead of falling back, so the corrupt content is never exposed.
+		rehydrated, rehydrateErr := domain.Rehydrate(events[:checkpoint.Revision])
+		if rehydrateErr != nil {
+			return nil, nil, fmt.Errorf("检查点内容校验失败: %w", rehydrateErr)
+		}
+		if !rehydrated.Equal(&checkpoint.Aggregate) {
+			return nil, nil, fmt.Errorf("检查点内容与事件历史不一致")
+		}
 		copyAggregate := checkpoint.Aggregate
 		agg = &copyAggregate
 		for _, event := range events[checkpoint.Revision:] {
