@@ -97,9 +97,6 @@ func (s *Service) Execute(ctx context.Context, caseID string, cmd Command) (Comm
 			err = decode(cmd.Payload, &c)
 			if err == nil {
 				events, err = agg.DecideVerifyRemediation(c, cmd.ActorID)
-				if err != nil {
-					err = fmt.Errorf("验证处置命令失败: %w", err)
-				}
 			}
 		case "submit_review":
 			var c domain.SubmitReview

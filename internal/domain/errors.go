@@ -1,6 +1,9 @@
 package domain
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 type ErrorCode string
 
@@ -32,7 +35,8 @@ func invalid(field, message string) error {
 func conflict(message string) error { return &RuleError{Code: CodeStateConflict, Message: message} }
 
 func ErrorDetails(err error) (ErrorCode, string, string) {
-	if e, ok := err.(*RuleError); ok {
+	var e *RuleError
+	if errors.As(err, &e) {
 		return e.Code, e.Field, e.Message
 	}
 	return "internal_error", "", "内部错误"
